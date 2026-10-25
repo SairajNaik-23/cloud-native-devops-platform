@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-demo-config
+  namespace: devops-demo
+data:
+  APP_ENV: "kubernetes"
+  PORT: "5000"

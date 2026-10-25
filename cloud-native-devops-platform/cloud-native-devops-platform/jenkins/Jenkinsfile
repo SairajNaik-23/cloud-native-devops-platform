@@ -1,0 +1,80 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        IMAGE_NAME = 'cloud-native-devops-platform'
+        LOCAL_IMAGE = 'cloud-native-devops-platform:${BUILD_NUMBER}'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Install and Test') {
+            steps {
+                sh '''
+                    python3 -m venv .venv
+                    . .venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r app/requirements.txt -r app/requirements-dev.txt
+                    pytest -q app/tests
+                '''
+            }
+        }
+
+        stage('Build Container') {
+            steps {
+                sh 'docker build -f docker/Dockerfile -t "$LOCAL_IMAGE" .'
+            }
+        }
+
+        stage('Publish to ECR') {
+            when {
+                allOf {
+                    branch 'main'
+                    expression { return env.ECR_REGISTRY?.trim() && env.AWS_DEFAULT_REGION?.trim() }
+                }
+            }
+            steps {
+                sh '''
+                    aws ecr get-login-password --region "$AWS_DEFAULT_REGION" |
+                      docker login --username AWS --password-stdin "$ECR_REGISTRY"
+                    docker tag "$LOCAL_IMAGE" "$ECR_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER"
+                    docker push "$ECR_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER"
+                '''
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            when {
+                allOf {
+                    branch 'main'
+                    expression { return env.DEPLOY_TO_K8S == 'true' && env.ECR_REGISTRY?.trim() }
+                }
+            }
+            steps {
+                sh '''
+                    kubectl apply -f k8s/namespace.yaml
+                    kubectl apply -f k8s/configmap.yaml
+                    kubectl apply -f k8s/service.yaml
+                    sed "s|cloud-native-devops-platform:local|$ECR_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER|" k8s/deployment.yaml |
+                      kubectl apply -f -
+                    kubectl -n devops-demo rollout status deployment/devops-demo --timeout=120s
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'rm -rf .venv || true'
+            echo 'Pipeline finished. Check stage results above; no deployment is implied by this message.'
+        }
+    }
+}

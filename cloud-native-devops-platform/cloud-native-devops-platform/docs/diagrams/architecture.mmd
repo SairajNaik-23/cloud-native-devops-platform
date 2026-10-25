@@ -1,0 +1,11 @@
+flowchart TD
+  Developer --> GitHub
+  GitHub --> Actions[GitHub Actions validation]
+  GitHub --> Jenkins
+  Jenkins --> Tests[Tests]
+  Tests --> DockerBuild[Build image]
+  DockerBuild --> ECR[Amazon ECR]
+  ECR --> Kubernetes[Kubernetes cluster]
+  Kubernetes --> App[Flask service]
+  App --> Datadog[Datadog Agent / integrations]
+  Terraform --> ECR
